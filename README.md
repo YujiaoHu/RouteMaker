@@ -23,6 +23,8 @@ cd partition-git
 ```
 
 ### Training RouteMaker for MDMTSP-CFA
+
+Model will be saved at `../savemodel`
 ```python
 python train.py --problem cfa
 ```
