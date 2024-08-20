@@ -44,17 +44,19 @@ python train.py --problem sdmtsp
 cd partition-git
 ```
 
-### Testing RouteMaker tailored for MDMTSP-CFA on testset with 10 agents and 100 locations. Code will automatically load the learned model under `savemodel/`
+### Testing RouteMaker tailored for MDMTSP-CFA on testset with 10 agents and 100 locations. 
+Code will automatically load the learned model under `../savemodel/`
+
 ```python
 python eval --problem cfa --anum 10 --cnum 100
 ```
 
-### Testing RouteMaker tailored for MDMTSP-CFD on testset with 20 agents and 200 locations. Code will automatically load the learned model under `savemodel/`
+### Testing RouteMaker tailored for MDMTSP-CFD on testset with 20 agents and 200 locations. 
 ```python
 python eval --problem cfd --anum 20 --cnum 200
 ```
 
-### Testing RouteMaker tailored for SDMSTP on testset with 20 agents and 200 locations. Code will automatically load the learned model under `savemodel/`
+### Testing RouteMaker tailored for SDMSTP on testset with 20 agents and 200 locations. 
 ```python
 python eval --problem sdmtsp --anum 20 --cnum 200
 ```
