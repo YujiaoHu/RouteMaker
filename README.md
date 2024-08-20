@@ -18,6 +18,10 @@ MDMTSP-CFA: one MDMTSP variation, in which agents start traveling from any locat
 * TensorboardX
   
 ## Training
+```python
+cd partition-git
+```
+
 ### Training RouteMaker for MDMTSP-CFA
 ```python
 python train.py --problem cfa
