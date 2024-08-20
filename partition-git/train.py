@@ -1,0 +1,255 @@
+import os
+import torch
+from options import get_options
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+from torch.utils.tensorboard import SummaryWriter
+# from tensorboardX import SummaryWriter
+from lib.transformerlayers.dystructure import DyTransformerMSTP as mdmtsp
+from lib.gendata.gendata_sdmtsp_v2 import gendata_mdmtsp as gendata_sdmtsp
+from lib.gendata.gendata_mix import gendata_mdmtsp as gendata_cfa_cfd
+# from lib.ortool.tourlen_computing import get_tour_len_singleTrack as orhelp
+from lib.ortool.tourlen_computing import get_tour_len as orhelp
+from lib.ortool.tourlen_computing import get_tour_len_wout_tours as orhelp_wout_tours
+import time
+from torch.distributions import Categorical
+from lib.gendata.read_real_data import Data_from_Real
+from lib.decode.beamsearch import beam_search_decoding
+from lib.decode.move_from_longest import move_from_longest_decoding
+import multiprocessing
+from tqdm import tqdm
+
+
+try:
+    multiprocessing.set_start_method('spawn', force=True)
+    # print(multiprocessing.get_start_method())
+except RuntimeError:
+    pass
+
+
+def tourlen_computing(inputs, tour, anum, notours=True):
+    # inputs: coordinates [batch. cnum, 2]
+    # tour: [batch, number_samples, cnum_1]
+    with torch.no_grad():
+        if notours is True:
+            tourlen = orhelp_wout_tours(tour, inputs, anum)
+            samples_tours = None
+        else:
+            tourlen, samples_tours = orhelp(tour, inputs, anum)
+    return tourlen, samples_tours
+
+
+class TrainModleDyMTSP(nn.Module):
+    def __init__(self, load=True,
+                 _modelpath=os.path.join(os.getcwd(), "../savemodel"),
+                 anum=2,
+                 cnum=20,
+                 _device=torch.device('cuda:0'),
+                 lr=1e-5,
+                 train_instance=10,
+                 entropy_coeff=0.1,
+                 obj='minmax',
+                 problem='sdmtsp'):
+        super(TrainModleDyMTSP, self).__init__()
+        
+        self.load = load
+        self.device = _device
+        self.modelpath = _modelpath
+        self.anum = anum
+        self.cnum = cnum
+        self.lr = lr
+        self.clip_argv = 3
+        self.train_instance = train_instance
+        self.entropy_coeff = entropy_coeff
+
+        self.obj = obj
+        self.problem = problem
+        
+        if self.problem in ['cfa', 'cfd']:
+            self.gendata_mdmtsp = gendata_cfa_cfd
+        else:
+            self.gendata_mdmtsp = gendata_sdmtsp
+        
+        self.icnt = 0
+        self.epoch = 0
+
+        self.model_name = ("git_mixed_sdmtsp_obj={}_problem={}_lr={}_entropy={}_trainIns={}"
+                           .format(self.obj, self.problem, self.lr,
+                                   self.entropy_coeff, self.train_instance))
+
+        self.model = mdmtsp(2, 4, 1024, 5)
+        self.model.to(self.device)
+
+        self.writer = SummaryWriter('../runs_obj={}_problem={}/{}'
+                                    .format(self.obj, self.problem, self.model_name))
+        self.modelfile = os.path.join(self.modelpath, '{}.pt'.format(self.model_name))
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+
+        if load:
+            print("loading model:{}".format(self.modelfile))
+            if os.path.exists(self.modelfile):
+                checkpoint = torch.load(self.modelfile, map_location=self.device)
+                self.model.load_state_dict(checkpoint['model_state_dict'])
+                self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+                self.icnt = checkpoint['icnt'] + 1
+                print("Model loaded")
+            else:
+                print("No Model loaded")
+
+    def rl_loss_computing(self, logits, tourlen, partition):
+        maxtourlen = torch.max(tourlen, dim=2)[0]
+        baselineTourlen = torch.mean(maxtourlen, dim=1, keepdim=True)
+        advantage = maxtourlen - baselineTourlen  # advantage:[number_samples]
+        # print("advantage ", advantage)
+        temp_partition = partition.permute(0, 2, 1)
+        probsloss = torch.gather(logits, 2, temp_partition)  # [cnum, number_samples]
+        probsloss = torch.sum(torch.log(probsloss), dim=1)
+
+        entropy = torch.mean(Categorical(logits).entropy())  # Tensor:[batch, req_num]
+
+        loss = torch.mean(probsloss * advantage) - self.entropy_coeff * entropy
+
+        return loss, entropy.item()
+
+    def mdmtsp_eval(self, icnt, cnum, anum, batch_size, valnum):
+        # greedy decoding is used
+        
+        assert valnum % batch_size == 0
+        maxiter = valnum // batch_size
+        
+        self.model.eval()
+        valset = self.gendata_mdmtsp(self.problem)
+
+        max_net_len = []
+        max_net_time = []
+
+        with (torch.no_grad()):
+            for it in tqdm(range(maxiter)):
+                batch_merge_coord = []
+                batch_cf = []
+                batch_af = []
+                for b in range(batch_size):
+                    merge_coord, cf, af = valset.getitem(anum, cnum)
+                    batch_merge_coord.append(merge_coord)
+                    batch_af.append(af)
+                    batch_cf.append(cf)
+                cf = torch.stack(batch_cf, dim=0)
+                af = torch.stack(batch_af, dim=0)
+                merge_coord = torch.stack(batch_merge_coord, dim=0)
+                
+                af, cf, merge_coord = af.to(self.device), cf.to(self.device), merge_coord.to(self.device)
+
+                start_time = time.time()
+                probs, partition = self.model(af, cf, maxsample=True, instance_num=1)
+                partition = partition.permute(0, 2, 1)
+                # tours:[batch, self.instance_num, self.anum]
+                tourlen, tours = tourlen_computing(merge_coord, partition, anum, notours=True)
+                end_time = time.time()
+                maxlen_overins = torch.max(tourlen, dim=-1)[0]
+                max_net_len.append(torch.min(maxlen_overins, dim=-1)[0])
+                max_net_time.append(torch.Tensor([end_time - start_time]) / batch_size)
+
+            max_net_len = torch.cat(max_net_len, dim=0)
+            max_net_time = torch.cat(max_net_time, dim=0)
+
+            print("anum = {}, cnum = {}, valnum = {}".format(anum, cnum, valnum))
+            print('Average time usage : {}'.format(torch.mean(max_net_time)))
+            print("Average tour length: ", torch.mean(max_net_len))
+            
+            self.writer.add_scalar('val/cost_anum={}_cnum={}'.format(anum, cnum),
+                                   torch.mean(max_net_len), icnt)
+        
+        print("verfication ends")
+        self.model.train()
+
+    def mdmtsp_train(self, batch_size=32):
+        train_set = self.gendata_mdmtsp(self.problem)
+
+        for it in range(self.icnt, 50001):
+            self.model.train()
+
+            batch_merge_coord = []
+            batch_cf = []
+            batch_af = []
+            anum = int(torch.randint(5, 11, size=(1,)))
+            cnum = int(torch.randint(anum * 10, 101, size=(1,)))
+            for b in range(batch_size):
+                merge_coord, cf, af = train_set.getitem(anum, cnum)
+                batch_merge_coord.append(merge_coord)
+                batch_af.append(af)
+                batch_cf.append(cf)
+            cf = torch.stack(batch_cf, dim=0)
+            af = torch.stack(batch_af, dim=0)
+            merge_coord = torch.stack(batch_merge_coord, dim=0)
+
+            merge_coord, cf, af \
+                = (merge_coord.to(self.device), cf.to(self.device), af.to(self.device))
+            probs, partition = self.model(af, cf, maxsample=False, instance_num=self.train_instance)
+            partition = partition.permute(0, 2, 1)
+            # tours:[batch, self.instance_num, self.anum]
+            
+            tourlen, tours = tourlen_computing(merge_coord, partition, anum, notours=True)
+
+            loss, entropy = self.rl_loss_computing(probs, tourlen, partition)
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.clip_argv)
+            self.optimizer.step()
+            self.optimizer.zero_grad()
+
+            maxtourlen = torch.max(tourlen, dim=2)[0]
+            self.writer.add_scalar('train/loss', loss.item(), it)
+            self.writer.add_scalar('train/max', torch.mean(maxtourlen), it)
+            self.writer.add_scalar('train/entropy', entropy, it)
+            print("    \n obj = {}, problem = {}, anum = {}, cnum = {}, it = {}, loss = {}, entropy = {}, max = {}"
+                  .format(self.obj, self.problem, anum, cnum, it,
+                          loss.item(), entropy, torch.mean(maxtourlen)))
+
+            if it % 100 == 0 and it > 0:
+                torch.save({'model_state_dict': self.model.state_dict(),
+                            'optimizer_state_dict': self.optimizer.state_dict(),
+                            'icnt': it,
+                            }, self.modelfile)
+                print("------------------")
+                print("saved model: it = {}, modelfile = {}".format(it, self.modelfile))
+                print("------------------")
+                if it % 500 == 0:
+                    for anum in [5, 10]:
+                        for cnum in [50, 100, 200]:
+                            self.mdmtsp_eval(it, cnum=cnum, anum=anum, batch_size=batch_size, valnum=5*batch_size)
+
+def main():
+    opts = get_options()
+    anum = opts.anum
+    cnum = opts.cnum
+    batch_size = opts.batch_size
+    device = torch.device(opts.cuda)
+    lr = opts.lr
+    trainIns = opts.trainIns
+    modelpath = opts.modelpath
+    entropy_coeff = opts.entropy_coeff
+    objective = opts.obj
+    problem = opts.problem
+    
+    assert problem in ['cfd', 'cfa', 'sdmtsp']
+    
+    if not os.path.exists(modelpath):
+        os.mkdir(modelpath)
+
+    mtsp = TrainModleDyMTSP(_modelpath=modelpath,
+                           anum=anum,
+                           cnum=cnum,
+                           _device=device,
+                           lr=lr,
+                           train_instance=trainIns,
+                           entropy_coeff=entropy_coeff,
+                           obj=objective,
+                           problem=problem
+                           )
+    # mtsp.mdmtsp_eval(0, cnum=cnum, anum=anum, batch_size=batch_size, valnum=5*batch_size)
+    mtsp.mdmtsp_train(batch_size=batch_size)
+
+
+if __name__ == '__main__':
+    print(os.getcwd())
+    # main_test()
+    main()
