@@ -38,6 +38,10 @@ python train.py --problem sdmtsp
 ```
 
 ## Testing
+```python
+cd partition-git
+```
+
 ### Testing RouteMaker tailored for MDMTSP-CFA on testset with 10 agents and 100 locations. Code will automatically load the learned model under `savemodel/`
 ```python
 python eval --problem cfa --anum 10 --cnum 100
