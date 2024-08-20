@@ -8,5 +8,3 @@ MDMTSP: Dedicated multi-depot MTSP, agent must start traveling at their dedicate
 MDMTSP-CFD: one MDMTSP variation, in which agents start and commence travels from their dedicated depots
 
 MDMTSP-CFA: one MDMTSP variation, in which agents start traveling from any locations.
-
-
