@@ -48,21 +48,22 @@ cd partition-git
 Code will automatically load the learned model under `../savemodel/`
 
 ```python
-python eval --problem cfa --anum 10 --cnum 100
+python eval.py --problem cfa --anum 10 --cnum 100
 ```
 
 ### Testing RouteMaker tailored for MDMTSP-CFD on testset with 20 agents and 200 locations. 
 ```python
-python eval --problem cfd --anum 20 --cnum 200
+python eval.py --problem cfd --anum 20 --cnum 200
 ```
 
 ### Testing RouteMaker tailored for SDMSTP on testset with 20 agents and 200 locations. 
 ```python
-python eval --problem sdmtsp --anum 20 --cnum 200
+python eval.py --problem sdmtsp --anum 20 --cnum 200
 ```
 
 ## Troubleshooting
 * The number of depots and current positions are not included in the total number of locations.
 * Before running the code, use ulimit -n 99999 to enable high parallel processing. 
 * In the very rare event that RouteMaker fails to converge, please delete the faulty model and retrain a new one.
+* The three pretrained RouteMaker for MDMTSP-CFA, MDMTSP-CFD, SDMTSP can be downloaded from 
 
