@@ -65,5 +65,5 @@ python eval.py --problem sdmtsp --anum 20 --cnum 200
 * The number of depots and current positions are not included in the total number of locations.
 * Before running the code, use ulimit -n 99999 to enable high parallel processing. 
 * In the very rare event that RouteMaker fails to converge, please delete the faulty model and retrain a new one.
-* The three pretrained RouteMaker for MDMTSP-CFA, MDMTSP-CFD, SDMTSP can be downloaded from 
+* The three pretrained RouteMaker for MDMTSP-CFA, MDMTSP-CFD, SDMTSP can be downloaded from https://pan.baidu.com/s/1Tc935Verqe0HW5NGfhQZgw?pwd=fkjf with extract passward: fkjf
 
