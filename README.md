@@ -10,8 +10,6 @@ MDMTSP-CFD: one MDMTSP variation, in which agents start and commence travels fro
 MDMTSP-CFA: one MDMTSP variation, in which agents start traveling from any locations.
 
 ## Dependencies
-
-## Dependencies
 * Python >= 3.10
 * Numpy
 * Google OR-Tools
@@ -51,8 +49,8 @@ python eval --problem cfd --anum 20 --cnum 200
 python eval --problem sdmtsp --anum 20 --cnum 200
 ```
 
-## Note
-* The number of depots and current positions are not inclued in the number of locations.
-* Use ulimit -n 99999 to enable high parallel before running the code
-* In the rarely possibility that RouteMaker cannot converge, please delete the bad model and retrain a new model. 
+## Troubleshooting
+* The number of depots and current positions are not included in the total number of locations.
+* Before running the code, use ulimit -n 99999 to enable high parallel processing. 
+* In the very rare event that RouteMaker fails to converge, please delete the faulty model and retrain a new one.
 
